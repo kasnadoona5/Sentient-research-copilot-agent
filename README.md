@@ -43,7 +43,6 @@ python3.11 --version
 
 ### 2. Prepare Project Directory
 
-#### Option A: Fresh Setup
 
 Create the project directory:
 
