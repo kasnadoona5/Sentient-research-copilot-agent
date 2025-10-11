@@ -73,8 +73,6 @@ pip install sentient-agent-framework httpx python-dotenv arxiv pdfplumber trafil
 
 ### 4. Configure Environment Variables Securely
 
-**⚠️ Never upload your `.env` to GitHub!**
-
 Copy the provided template and fill in your secrets:
 
 ```bash
