@@ -80,10 +80,8 @@ pip freeze > requirements.txt
 
 ### 4. Configure Environment Variables Securely
 
-**⚠️ Never upload `.env` to GitHub!**
 
 ```bash
-cp .env.example .env
 nano .env  # Fill in your actual API keys (local only)
 ```
 
