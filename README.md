@@ -51,7 +51,8 @@ sudo chown $USER:$USER /opt/research-copilot-agent
 cd /opt/research-copilot-agent
 python3.11 -m venv venv
 source venv/bin/activate
-git clone https://github.com/kasnadoona5/Sentient-research-copilot-agent.git .
+git clone https://github.com/kasnadoona5/Sentient-research-copilot-agent.git
+cd /Sentient-research-copilot-agent
 ls
 ```
 
