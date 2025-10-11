@@ -216,7 +216,7 @@ curl -i -X POST http://YOUR_SERVER_IP:8000/assist \
   },
   "query": {
     "id": "01K77K1HZE3BCDDS2MKBK7DKZ8",
-    "prompt": "https://en.wikipedia.org/wiki/Georg_Karo"
+    "prompt": "https://en.wikipedia.org/wiki/Artificial_intelligence"
   }
 }'
 ```
