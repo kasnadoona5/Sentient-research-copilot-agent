@@ -199,6 +199,32 @@ http://YOUR_SERVER_IP/
 
 ---
 
+### API Call Example
+You can also call the agent directly via API (for use in scripts, other apps, etc):
+
+```bash
+curl -i -X POST http://YOUR_SERVER_IP:8000/assist \
+-H "Content-Type: application/json" \
+-d '{
+  "session": {
+    "user_id": "01K77K1HZE3BCDDS2MKBK7DKZ8",
+    "session_id": "01K77K1HZE3BCDDS2MKBK7DKZ8",
+    "processor_id": "01K77K1HZE3BCDDS2MKBK7DKZ8",
+    "activity_id": "01K77K1HZE3BCDDS2MKBK7DKZ8",
+    "request_id": "01K77K1HZE3BCDDS2MKBK7DKZ8",
+    "interactions": []
+  },
+  "query": {
+    "id": "01K77K1HZE3BCDDS2MKBK7DKZ8",
+    "prompt": "https://en.wikipedia.org/wiki/Georg_Karo"
+  }
+}'
+```
+Replace YOUR_SERVER_IP with your actual server IP address.
+All session fields require a valid ULID (unique string per request).
+
+You can set "prompt" to any question or research link.
+
 
 ## Viewing Logs
 
