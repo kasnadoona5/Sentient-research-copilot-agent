@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Research Copilot Agent</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- ULID dependency -->
+  <script src="https://unpkg.com/ulid@2.3.0/dist/index.umd.js"></script>
+  <!-- Markdown renderer -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: linear-gradient(135deg, #e7eaf6 0%, #f5f7fb 100%);
+    }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container {
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 8px 24px #b2b8ce33, 0 1.5px 4px #3331;
+      padding: 38px 26px 20px 26px;
+      max-width: 640px;
+      width: 98vw;
+      min-width: 340px;
+      min-height: 650px;
+      margin: 40px auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    h2 {
+      letter-spacing: 0.2px;
+      font-size: 2em;
+      margin: 0 0 10px 0;
+      font-weight: 700;
+      color: #3a4876;
+      text-align: center;
+    }
+    label {
+      color: #444a6b;
+      font-size: 1em;
+      font-weight: 500;
+      display: block;
+      margin-bottom: 6px;
+      margin-left: 2px;
+    }
+    textarea, input {
+      font-family: inherit;
+      font-size: 1em;
+      border-radius: 8px;
+      border: 1.5px solid #bcc7df;
+      outline: none;
+      padding: 13px 10px;
+      margin-bottom: 5px;
+      width: 100%;
+      background: #f8fafc;
+      resize: vertical;
+      box-sizing: border-box;
+      transition: border 0.15s;
+    }
+    textarea:focus, input:focus {
+      border-color: #8b9eff;
+      background: #f4f8fb;
+    }
+    button {
+      background: #5576e7;
+      color: #fff;
+      padding: 11px 24px;
+      border: 0;
+      border-radius: 8px;
+      font-size: 1em;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 0;
+      margin-bottom: 0;
+      float: right;
+      margin-left: 0;
+      transition: background 0.18s;
+    }
+    button:hover {
+      background: #3a4876;
+    }
+    .chat {
+      background: #f9fbff;
+      border-radius: 12px;
+      box-shadow: 0 1.5px 4px #dde2f733;
+      padding: 18px 18px 12px 18px;
+      margin-top: 8px;
+      margin-bottom: 0;
+      min-height: 220px;
+      max-height: 370px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      font-size: 1.02em;
+      word-break: break-word;
+    }
+    .pair {
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 5px;
+    }
+    .q {
+      align-self: flex-end;
+      background: #eae9f9;
+      color: #3d3963;
+      border-radius: 8px 8px 3px 8px;
+      max-width: 90%;
+      padding: 7px 12px;
+      margin-bottom: 2px;
+      font-weight: bold;
+      font-size: 1.03em;
+      margin-right: 3px;
+    }
+    .a {
+      align-self: flex-start;
+      background: #fafdff;
+      color: #2a2e38;
+      border-radius: 8px 8px 8px 3px;
+      max-width: 98%;
+      padding: 6px 11px;
+      margin-left: 2px;
+      margin-bottom: 2px;
+    }
+    .a h1, .a h2, .a h3, .a h4 {
+      color: #4e68d0;
+      margin-top: 12px;
+      margin-bottom: 7px;
+    }
+    .a ul {
+      margin: 8px 0 8px 2em;
+    }
+    .a li {
+      margin-bottom: 3px;
+    }
+    .a strong { color: #3548a4; }
+    .a a { color: #3548a4; text-decoration: underline; }
+    @media (max-width: 540px) {
+      .container { padding: 17px 0vw 10px 0vw; }
+      h2 { font-size: 1.15em; }
+      .chat { font-size: .98em;}
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Research Copilot</h2>
+    <form id="copilotForm" autocomplete="off" style="margin-bottom:9px;">
+      <label for="prompt">Enter Arxiv, PDF or Web Link + any research question:</label>
+      <div style="display:flex; gap:8px;">
+        <textarea id="prompt" rows="2" required style="flex:1; margin-bottom:0;"></textarea>
+        <button type="submit">Ask</button>
+      </div>
+    </form>
+    <div class="chat" id="chat"></div>
+  </div>
+<script>
+const chat = document.getElementById('chat');
+const form = document.getElementById('copilotForm');
+const promptInput = document.getElementById('prompt');
+let history = []; // stores [{q: ..., a: ...}, ...]
+
+form.onsubmit = async function(e){
+  e.preventDefault();
+  const prompt = promptInput.value.trim();
+  if (!prompt) return;
+  // Show user's question "optimistically"
+  addToHistory(prompt, "<em>Working...</em>");
+  promptInput.value = "";
+  // Compose request, same as before
+  const id = ULID.ulid();
+  const sessionObj = {
+    user_id: id,
+    session_id: id,
+    processor_id: id,
+    activity_id: id,
+    request_id: id,
+    interactions:[]
+  };
+  const queryObj = { id: id, prompt: prompt };
+  const res = await fetch('/assist', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      session: sessionObj,
+      query: queryObj
+    })
+  });
+  const reader = res.body.getReader();
+  let decoder = new TextDecoder();
+  let buffer = '';
+  let payloadContent = "";
+  while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value);
+    const lines = buffer.split('\n').filter(x => x.startsWith('data:'));
+    for (const line of lines) {
+      try {
+        const payload = JSON.parse(line.replace(/^data:\s*/, ''));
+        if (payload.content && payload.content.trim().length > 0) {
+          payloadContent = payload.content;
+          updateLastAnswer(payloadContent);
+        }
+      } catch (e) {
+        updateLastAnswer(buffer);
+      }
+    }
+  }
+};
+
+function addToHistory(question, answer) {
+  history.push({q: question, a: answer});
+  renderHistory();
+}
+function updateLastAnswer(answer) {
+  if (history.length > 0) {
+    history[history.length-1].a = answer;
+    renderHistory();
+  }
+}
+function renderHistory() {
+  chat.innerHTML = history.map(pair => `
+    <div class="pair">
+      <div class="q">${marked.parseInline(escapeHTML(pair.q))}</div>
+      <div class="a">${marked.parse(pair.a)}</div>
+    </div>
+  `).join('');
+  chat.scrollTop = chat.scrollHeight;
+}
+function escapeHTML(str) {
+  return str.replace(/[&<>"']/g, function(m) {
+    return ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "'":'&#39;'
+    })[m];
+  });
+}
+</script>
+</body>
+</html>
