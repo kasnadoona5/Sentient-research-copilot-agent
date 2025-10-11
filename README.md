@@ -82,6 +82,7 @@ pip freeze > requirements.txt
 
 
 ```bash
+cp .env.example .env
 nano .env  # Fill in your actual API keys (local only)
 ```
 
