@@ -30,7 +30,7 @@ A full-featured research and knowledge assistant that provides summarization, Q&
 
 ### 1. System Preparation
 
-Install required system packages:
+Install all required system packages:
 
 ```bash
 sudo apt update && sudo apt upgrade -y
@@ -43,68 +43,64 @@ python3.11 --version
 
 ### 2. Prepare Project Directory
 
-Clone this repository directly into `/opt/research-copilot-agent` (folder name can be different locally):
+#### Option A: Fresh Setup
+
+Create the project directory:
 
 ```bash
 sudo mkdir -p /opt/research-copilot-agent
 sudo chown $USER:$USER /opt/research-copilot-agent
 cd /opt/research-copilot-agent
+```
+
+Clone the repository into this directory:
+
+```bash
+git clone https://github.com/kasnadoona5/Sentient-research-copilot-agent.git .
+```
+
+**⚠️ IMPORTANT:** All code files (`app.py`, `requirements.txt`, etc.) should be directly inside `/opt/research-copilot-agent`. 
+
+If they end up in a subfolder (`/opt/research-copilot-agent/Sentient-research-copilot-agent`), fix it with:
+
+```bash
+mv Sentient-research-copilot-agent/* Sentient-research-copilot-agent/.[!.]* .
+rm -rf Sentient-research-copilot-agent
+```
+
+### 3. Python Virtual Environment & Install Complete Dependencies
+
+```bash
 python3.11 -m venv venv
 source venv/bin/activate
-git clone https://github.com/kasnadoona5/Sentient-research-copilot-agent.git
-cd Sentient-research-copilot-agent
-ls
-```
-
-**Verify:** Files like `app.py`, `index.html`, `requirements.txt`, `document_loader.py`, etc. should be directly inside `/opt/research-copilot-agent`.
-
-### 3. Install Python Dependencies
-
-```bash
 pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-**Fallback:** If `requirements.txt` is missing (shouldn't be):
-
-```bash
 pip install sentient-agent-framework httpx python-dotenv arxiv pdfplumber trafilatura
+pip freeze > requirements.txt
 ```
 
 ### 4. Configure Environment Variables Securely
 
-Copy the provided template and fill in your secrets:
+**⚠️ Never upload `.env` to GitHub!**
 
 ```bash
 cp .env.example .env
-nano .env  # Fill in your real API credentials on your own server ONLY
+nano .env  # Fill in your actual API keys (local only)
 ```
-
-Sample for `.env.example` (already in the repo):
-
-```env
-OPENROUTER_API_KEY=your_api_key_here
-ODP_API_URL=http://localhost:8000/search-alt
-ODP_API_KEY=your_odp_key
-ODP_SERPER_KEY=your_serper_key
-```
-
-**Important:** Do not upload `.env` to the repo!
 
 ### 5. Test Local Run
-
-Verify the application starts correctly:
 
 ```bash
 source venv/bin/activate
 python3 app.py
 ```
 
-Application should start without errors. Press Ctrl+C to stop after verification.
+**Expected:** Should start with no errors.
+
+**⚠️ Troubleshooting:** If you see "can't open file": your `app.py` is in the wrong folder. Move it and all other files directly to `/opt/research-copilot-agent`.
 
 ### 6. Configure nginx
 
-Set up nginx to serve the UI and proxy API requests:
+Edit the nginx configuration:
 
 ```bash
 sudo nano /etc/nginx/sites-available/default
@@ -141,15 +137,23 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
+**If you see a 403 Forbidden error:**
+
+```bash
+sudo chown -R www-data:www-data /opt/research-copilot-agent
+sudo chmod -R 755 /opt/research-copilot-agent
+sudo systemctl reload nginx
+```
+
 ### 7. Deploy as systemd Service (Production)
 
-Create the systemd service file:
+Create the systemd unit file:
 
 ```bash
 sudo nano /etc/systemd/system/copilot-agent.service
 ```
 
-Paste the following configuration:
+Paste this configuration (**with absolutely no comments on the User line**):
 
 ```ini
 [Unit]
@@ -167,8 +171,7 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 ```
-
-> **Note:** Change `User=root` to your username if preferred (use `whoami` to find it).
+**User=root** can be different on your system. use **whoami** to find your user.
 
 Enable and start the service:
 
@@ -179,7 +182,8 @@ sudo systemctl start copilot-agent
 sudo systemctl status copilot-agent
 ```
 
-### 8. Access Your Application
+
+### 8. Access and Verify
 
 Open your browser and navigate to:
 
@@ -187,10 +191,11 @@ Open your browser and navigate to:
 http://YOUR_SERVER_IP/
 ```
 
-✅ Copilot UI loads  
-✅ All API/chat works via `/assist` proxied through nginx
+✅ UI should appear  
+✅ Chat/API will work
 
 ---
+
 
 ## Viewing Logs
 
@@ -250,5 +255,22 @@ Built on the [Sentient Agent Framework](https://github.com/sentient-agi/Sentient
 - **Sentient Agent Framework**: [sentient-agi/Sentient-Agent-Framework](https://github.com/sentient-agi/Sentient-Agent-Framework)
 
 ---
+# Sentient Research Copilot Agent — Complete Secure Installation
+
+A battle-tested, zero-error deployment guide for production environments. Follow each step carefully for a 100% clean installation.
+
+---
+
+## Prerequisites
+
+- Ubuntu/Debian Linux
+- Root or sudo access
+- Basic familiarity with terminal commands
+
+---
+
+
+
+
 
 
