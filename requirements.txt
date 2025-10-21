@@ -1,2 +1,9 @@
 httpx
 python-dotenv
+sentient-agent-framework
+arxiv
+pdfplumber
+trafilatura
+spacy
+transformers
+torch
