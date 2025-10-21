@@ -1,10 +1,18 @@
 import os
 import sys
 import json
-from sentient_agent_framework import AbstractAgent, DefaultServer, Session, Query, ResponseHandler
-from document_loader import fetch_arxiv_abstract, fetch_pdf_text, fetch_web_text
 import httpx
+from sentient_agent_framework import (
+    AbstractAgent,
+    DefaultServer,
+    Session,
+    Query,
+    ResponseHandler
+)
+from document_loader import fetch_arxiv_abstract, fetch_pdf_text, fetch_web_text
 from dotenv import load_dotenv
+import asyncio
+import re
 
 load_dotenv()
 
@@ -29,7 +37,7 @@ def call_opendeepsearch(query):
     print(f"{log_prefix} Request for query: {query}", file=sys.stderr, flush=True)
     if not (url and api_key and serper_key and openrouter_key):
         print(f"{log_prefix} Not all config available, skipping ODP call", file=sys.stderr, flush=True)
-        return None
+        return "[OpenDeepSearch Used] OpenDeepSearch not configured."
     headers = {
         "X-API-KEY": api_key,
         "serper-api-key": serper_key,
@@ -40,10 +48,10 @@ def call_opendeepsearch(query):
         r = httpx.post(url, json=data, headers=headers, timeout=30)
         r.raise_for_status()
         print(f"{log_prefix} Response: {r.text[:400]}", file=sys.stderr, flush=True)
-        return r.json()
+        return "[OpenDeepSearch Used]\n" + format_output(r.json())
     except Exception as e:
         print(f"{log_prefix} Error: {e}", file=sys.stderr, flush=True)
-        return None
+        return f"[OpenDeepSearch Used] OpenDeepSearch error: {e}"
 
 def call_wikipedia(query):
     api_url = "https://en.wikipedia.org/api/rest_v1/page/summary/"
@@ -53,7 +61,7 @@ def call_wikipedia(query):
         r = httpx.get(api_url + slug, timeout=10)
         data = r.json()
         if "extract" in data and data["extract"]:
-            return f"**Wikipedia Summary for [{data.get('title','')}]({data.get('content_urls',{}).get('desktop',{}).get('page','')})**\n\n{data['extract']}"
+            return f"[Wikipedia]\n**Wikipedia Summary for [{data.get('title','')}]({data.get('content_urls',{}).get('desktop',{}).get('page','')})**\n\n{data['extract']}"
         params = {
             "action":"query", "format":"json", "list":"search", "srsearch":query
         }
@@ -65,146 +73,205 @@ def call_wikipedia(query):
             r3 = httpx.get(api_url + title.replace(' ','_'), timeout=10)
             data2 = r3.json()
             if "extract" in data2 and data2["extract"]:
-                return f"**Wikipedia Summary for [{data2.get('title','')}]({data2.get('content_urls',{}).get('desktop',{}).get('page','')})**\n\n{data2['extract']}"
-        return None
+                return f"[Wikipedia]\n**Wikipedia Summary for [{data2.get('title','')}]({data2.get('content_urls',{}).get('desktop',{}).get('page','')})**\n\n{data2['extract']}"
+        return "[Wikipedia] entry not found."
     except Exception as e:
         print(f"[WIKI] Error: {e}", file=sys.stderr, flush=True)
-        return None
+        return f"[Wikipedia] error: {e}"
+
+def call_arxiv(query):
+    try:
+        arxiv_id = None
+        if "arxiv.org" in query:
+            arxiv_id = query.split("arxiv.org/abs/")[-1].split()[0]
+        elif query.strip().replace('.', '').isdigit():
+            arxiv_id = query.strip()
+        if not arxiv_id:
+            return "[arXiv] No valid arXiv ID provided."
+        return "[arXiv]\n" + (fetch_arxiv_abstract(arxiv_id) or "arXiv ID not found.")
+    except Exception as e:
+        return f"[arXiv] error: {e}"
+
+def call_pdf_parse(query):
+    try:
+        pdf_url = None
+        for word in query.split():
+            if word.endswith(".pdf"):
+                pdf_url = word
+                break
+        if not pdf_url:
+            return "[PDF Parse] No PDF URL found in input."
+        text = fetch_pdf_text(pdf_url)
+        return "[PDF Parse]\n" + (text or "Could not extract PDF text.")
+    except Exception as e:
+        return f"[PDF Parse] error: {e}"
+
+def call_web_fetch(query):
+    try:
+        url = None
+        for word in query.split():
+            if word.startswith("http"):
+                url = word
+                break
+        if not url:
+            return "[Web Fetch] No valid URL found in input."
+        text = fetch_web_text(url)
+        return "[Web Fetch]\n" + (text or "Could not extract web page.")
+    except Exception as e:
+        return f"[Web Fetch] error: {e}"
+
+async def call_openrouter_llm(messages, llm_api_key, llm_model):
+    headers = {"Authorization": f"Bearer {llm_api_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": llm_model,
+        "messages": messages,
+        "stream": False,
+        "max_tokens": 700
+    }
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers)
+        r.raise_for_status()
+        return r.json()
 
 class ResearchCopilotAgent(AbstractAgent):
     def __init__(self):
         super().__init__("Research Copilot")
         self.llm_api_key = os.getenv("OPENROUTER_API_KEY")
         self.llm_model = "mistralai/mistral-small-3.2-24b-instruct:free"
-        assert self.llm_api_key, "Set OPENROUTER_API_KEY in your .env"
+        if not self.llm_api_key:
+            raise RuntimeError("Set OPENROUTER_API_KEY in your .env")
+        self.memory = {}
 
-    async def decide_tool_llm(self, user_prompt):
-        """
-        Ask the LLM if the question is best answered from Wikipedia or OpenDeepSearch.
-        Expects LLM to answer as: "WIKI" or "ODP"
-        """
-        prompt = (
-            "You are a smart agent router. Decide which source is best to answer the user query:\n"
-            "- If the answer can be found as a static factual summary or entity on Wikipedia, reply with ONLY 'WIKI'.\n"
-            "- If the answer requires dynamic, recent, news, product prices, lists, reviews, data, web articles, or anything that Wikipedia likely doesn't cover, reply with ONLY 'ODP'.\n"
-            "- User Query: " + user_prompt
-        )
-        headers = {"Authorization": f"Bearer {self.llm_api_key}", "Content-Type": "application/json"}
-        payload = {
-            "model": self.llm_model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "max_tokens": 10
-        }
-        try:
-            async with httpx.AsyncClient() as client:
-                r = await client.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers, timeout=30)
-                result = r.json()
-                if isinstance(result, dict) and 'choices' in result and result['choices']:
-                    tool = result['choices'][0]['message']['content'].strip().upper()
-                    if tool in ("WIKI", "ODP"):
-                        return tool
-                print("[ROUTER LLM RESPONSE ERROR]", result, file=sys.stderr, flush=True)
-                return "ODP"
-        except Exception as e:
-            print(f"[ROUTER LLM ERROR] {e}", file=sys.stderr, flush=True)
-            return "ODP"
+    def get_memory(self, session_id):
+        return self.memory.setdefault(session_id, [])
+
+    def add_to_memory(self, session_id, user_prompt, agent_summary):
+        self.memory.setdefault(session_id, []).append((user_prompt, agent_summary))
 
     async def assist(self, session: Session, query: Query, response_handler: ResponseHandler):
         prompt = query.prompt.strip()
-        url, arxiv_id, pdf_url = None, None, None
+        session_key = getattr(session, 'session_id', getattr(session, 'id', None))
+        history = self.get_memory(session_key)
+        stream = response_handler.create_text_stream("FINAL_RESPONSE")
 
-        stream = response_handler.create_text_stream("response")
-        print(f"[DEBUG] >>> Prompt: {prompt}", file=sys.stderr, flush=True)
+        system_prompt = (
+            "You are Research Copilot, a smart agent that can use multiple online tools to answer complex questions. "
+            "You have available tools: "
+            "- opendeepsearch: for web search, news, reviews, trending/current content\n"
+            "- wikipedia: for factual or encyclopedic summaries\n"
+            "- arxiv: for scientific/academic papers (ID or arxiv URL)\n"
+            "- pdf_parse: for extracting and summarizing PDF documents (by URL)\n"
+            "- web_fetch: for extracting and summarizing public webpages\n"
+            "For each user question, decide which tool(s) to use and with what prompt."
+            "Return a JSON of the tool(s) to call, with one of: wikipedia, opendeepsearch, arxiv, pdf_parse, web_fetch, and the exact prompt/query for each. Do NOT answer the question directly until tool results are provided."
+        )
+
+        messages = [{"role": "system", "content": system_prompt}]
+        for q, a in history[-3:]:
+            messages.append({"role": "user", "content": q})
+            messages.append({"role": "assistant", "content": a.strip()[:500]})
+        messages.append({"role": "user", "content": prompt})
+
+        plan_prompt = (
+            "Based on the conversation and user query, return ONLY a valid JSON like:\n"
+            '[ {"tool": "opendeepsearch", "prompt": "latest in AI hardware"}, '
+            '{"tool": "wikipedia", "prompt": "GPT-5"} ]\n'
+            'Call all tools that are needed. Do not include any other text or answer. '
+            'If summarization is needed (e.g., for long PDF/web content), pass the best summarization question as the "prompt".'
+        )
+        plan_messages = messages + [{"role": "user", "content": plan_prompt}]
+        plan_response = await call_openrouter_llm(plan_messages, self.llm_api_key, self.llm_model)
+
+        def _extract_json_block(s: str):
+            s = (s or "").strip()
+
+            # Strip code fences like ```json ... ``` or ``` ... ```
+            s = re.sub(r'^```(?:json|JSON)?\s*', '', s)
+            s = re.sub(r'```$', '', s)
+
+            # Strip a bare leading language tag like "json\n"
+            s = re.sub(r'^(?i:json)\s*', '', s)
+
+            # Try to locate the first JSON array/object to be safe
+            m = re.search(r'(\[.*\]|\{.*\})', s, flags=re.DOTALL)
+            if m:
+                return json.loads(m.group(1))
+            # Fall back to whole string
+            return json.loads(s)
 
         try:
-            # Extraction logic
-            if "arxiv.org" in prompt:
-                arxiv_id = prompt.split("arxiv.org/abs/")[-1].split()[0]
-                print(f"[DEBUG] Detected arxiv ID: {arxiv_id}", file=sys.stderr, flush=True)
-            elif ".pdf" in prompt:
-                pdf_url = [word for word in prompt.split() if word.endswith(".pdf")][0]
-                print(f"[DEBUG] Detected PDF URL: {pdf_url}", file=sys.stderr, flush=True)
-            elif "http" in prompt:
-                url = [word for word in prompt.split() if word.startswith("http")][0]
-                print(f"[DEBUG] Detected URL: {url}", file=sys.stderr, flush=True)
+            plan_content = plan_response["choices"][0]["message"]["content"]
+            tool_actions = _extract_json_block(plan_content)
 
-            content = None
-            error_msg = None
-            if arxiv_id:
-                content = fetch_arxiv_abstract(arxiv_id)
-                if not content:
-                    error_msg = "Could not fetch arxiv abstract. Is the ID correct?"
-            elif pdf_url:
-                content = fetch_pdf_text(pdf_url)
-                if not content:
-                    error_msg = f"Could not fetch or parse PDF: {pdf_url}. Is it a valid, accessible PDF?"
-            elif url:
-                content = fetch_web_text(url)
-                if not content:
-                    error_msg = f"Could not fetch or parse web page: {url}."
-
-            print(f"[DEBUG] Extracted content (first 200): {(content or '')[:200]}", file=sys.stderr, flush=True)
-
-            # Use LLM to route between Wikipedia and OpenDeepSearch
-            if not content:
-                tool = await self.decide_tool_llm(prompt)
-                if tool == "WIKI":
-                    wiki_result = call_wikipedia(prompt)
-                    if wiki_result:
-                        await stream.emit_chunk(wiki_result)
-                    else:
-                        await stream.emit_chunk("No Wikipedia result found. Try rephrasing, or ask a more general question.")
-                else:
-                    odp_result = call_opendeepsearch(prompt)
-                    if odp_result:
-                        odp_text = format_output(odp_result)
-                        await stream.emit_chunk(f"[OpenDeepSearch Result]\n\n{odp_text}")
-                    else:
-                        await stream.emit_chunk("Could not extract content and no external search result. Please retry with a valid link or different topic.")
-                await stream.complete()
-                print(f"[ERROR] No content extracted (LLM router: {tool})", file=sys.stderr, flush=True)
-                return
-
-        except Exception as ex:
-            await stream.emit_chunk(f"Extraction error: {str(ex)}")
+            # Validate shape: must be a nonempty list of dicts with a "tool" key
+            if not (isinstance(tool_actions, list) and tool_actions and all(isinstance(x, dict) and "tool" in x for x in tool_actions)):
+                raise ValueError("Tool plan must be a non-empty list of objects each containing a 'tool' key.")
+        except Exception as exc:
+            await stream.emit_chunk(
+                "Tool selection LLM returned invalid JSON or error: "
+                + str(exc)
+                + "\nRaw:\n"
+                + repr(plan_response)
+            )
             await stream.complete()
-            print(f"[ERROR] Exception during extraction: {ex}", file=sys.stderr, flush=True)
             return
 
-        # LLM call for summary
-        await self.summarize_and_stream(content, prompt, stream)
+        tool_results = {}
+        for action in tool_actions:
+            tool = action.get("tool", "").strip()
+            tool_prompt = action.get("prompt", "").strip()
+            if tool == "opendeepsearch":
+                tool_results[tool] = call_opendeepsearch(tool_prompt)
+            elif tool == "wikipedia":
+                tool_results[tool] = call_wikipedia(tool_prompt)
+            elif tool == "arxiv":
+                tool_results[tool] = call_arxiv(tool_prompt)
+            elif tool == "pdf_parse":
+                text = call_pdf_parse(tool_prompt)
+                tool_results[tool] = await self.summarize_with_llm(text, prompt)
+            elif tool == "web_fetch":
+                text = call_web_fetch(tool_prompt)
+                tool_results[tool] = await self.summarize_with_llm(text, prompt)
+            else:
+                tool_results[tool] = f"[Agent error: Tool '{tool}' not supported.]"
 
-    async def summarize_and_stream(self, content, user_prompt, stream):
-        system_msg = (
-            "You are a research assistant. Given the following TEXT, produce a summary, highlight key points, and organize findings in bullet points. Only use information from the text."
+        aggregation_prompt = (
+            "Using the following tool results, synthesize a clear and concise response to the user's question. "
+            "You may quote or paraphrase results. List sources if relevant.\n\n"
+            "Tool results:\n" + "\n\n".join(f"{k}: {v}" for k, v in tool_results.items())
         )
-        llm_prompt = f"{system_msg}\n\nTEXT:\n{content[:3500]}\n\nUserInstruction: {user_prompt}"
+        agg_input = messages + [{"role": "user", "content": aggregation_prompt}]
+        agg_response = await call_openrouter_llm(agg_input, self.llm_api_key, self.llm_model)
+        try:
+            answer = agg_response["choices"][0]["message"]["content"]
+        except Exception as exc:
+            answer = "Error aggregating tool results: " + str(exc)
+        await stream.emit_chunk(answer)
+        self.add_to_memory(session_key, prompt, answer)
+        await stream.complete()
 
+    async def summarize_with_llm(self, text, user_prompt):
+        if not text or len(text) < 50:
+            return text
         headers = {"Authorization": f"Bearer {self.llm_api_key}", "Content-Type": "application/json"}
+        llm_prompt = (
+            "You are a research assistant. Summarize the following text for the given query.\n"
+            f"QUERY: {user_prompt}\n\nEXTRACTED TEXT:\n{text[:3500]}"
+        )
         payload = {
             "model": self.llm_model,
             "messages": [{"role": "user", "content": llm_prompt}],
             "stream": False,
-            "max_tokens": 700
+            "max_tokens": 500
         }
-        print("[DEBUG] LLM payload built, sending request...", file=sys.stderr, flush=True)
-        try:
-            async with httpx.AsyncClient() as client:
-                r = await client.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers, timeout=60)
-                print(f"[DEBUG] LLM HTTP status: {r.status_code}", file=sys.stderr, flush=True)
-                result = r.json()
-                summary = ""
-                if isinstance(result, dict) and 'choices' in result and result['choices']:
-                    summary = result["choices"][0]["message"]["content"]
-                    formatted = format_output(summary)
-                    await stream.emit_chunk(formatted)
-                else:
-                    await stream.emit_chunk(f"LLM call failed or returned no choices. Raw response:\n{format_output(result)}")
-        except Exception as e:
-            await stream.emit_chunk(f"Error from LLM: {str(e)}")
-            print(f"[ERROR] Exception in summarize_and_stream: {e}", file=sys.stderr, flush=True)
-        await stream.complete()
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers)
+            try:
+                res = r.json()
+                out = res["choices"][0]["message"]["content"]
+                return out if out else text
+            except Exception:
+                return text
 
 if __name__ == "__main__":
     agent = ResearchCopilotAgent()
