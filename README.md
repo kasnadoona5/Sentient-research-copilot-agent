@@ -73,8 +73,14 @@ rm -rf Sentient-research-copilot-agent
 python3.11 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
+
 pip install sentient-agent-framework httpx python-dotenv arxiv pdfplumber trafilatura
+pip install spacy torch transformers
+
+python -m spacy download en_core_web_sm
+
 pip freeze > requirements.txt
+
 ```
 
 ### 4. Configure Environment Variables Securely
