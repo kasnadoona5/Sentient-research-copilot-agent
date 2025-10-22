@@ -255,15 +255,6 @@ sudo systemctl restart copilot-agent
 # Check status
 sudo systemctl status copilot-agent
 ```
-
-
----
-### View Logs
-
-```bash
-sudo journalctl -u copilot-agent -f
-```
-
 ---
 
 ## Architecture
