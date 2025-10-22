@@ -45,7 +45,7 @@ def call_opendeepsearch(query):
     }
     data = {"query": query}
     try:
-        r = httpx.post(url, json=data, headers=headers, timeout=30)
+        r = httpx.post(url, json=data, headers=headers, timeout=300)  # Set timeout to 5 minutes
         r.raise_for_status()
         print(f"{log_prefix} Response: {r.text[:400]}", file=sys.stderr, flush=True)
         return "[OpenDeepSearch Used]\n" + format_output(r.json())
@@ -128,7 +128,7 @@ async def call_openrouter_llm(messages, llm_api_key, llm_model):
         "stream": False,
         "max_tokens": 700
     }
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=300) as client:  # Increased timeout
         r = await client.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers)
         r.raise_for_status()
         return r.json()
@@ -236,12 +236,14 @@ class ResearchCopilotAgent(AbstractAgent):
                 tool_results[tool] = f"[Agent error: Tool '{tool}' not supported.]"
 
         aggregation_prompt = (
-               "You are given results from multiple tools. Your task is to **combine these results** into a detailed, cohesive answer. "
-               "Do **not summarize**; instead, **synthesize** the information into a clear recommendation that combines the best insights "
-               "from each source. For each tool, you should include specific recommendations, comparisons, and product details where applicable.\n\n"
-                "Tool results:\n" + "\n\n".join(f"{k}: {v}" for k, v in tool_results.items())
-        
+            "You are given results from multiple tools. Your task is to **combine these results** into a detailed, cohesive answer. "
+            "Do **not summarize**; instead, **synthesize** the information into a clear, informative response that provides the best insights "
+            "from each source. For each tool, you should provide relevant details, recommendations, and comparisons where applicable. "
+            "Be sure to address the user's query directly, and do not leave out any essential details.\n\n"
+            "User's query: " + prompt + "\n\n"
+            "Tool results:\n" + "\n\n".join(f"{k}: {v}" for k, v in tool_results.items())
         )
+
         agg_input = messages + [{"role": "user", "content": aggregation_prompt}]
         agg_response = await call_openrouter_llm(agg_input, self.llm_api_key, self.llm_model)
         try:
