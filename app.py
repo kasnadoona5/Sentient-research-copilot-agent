@@ -236,9 +236,11 @@ class ResearchCopilotAgent(AbstractAgent):
                 tool_results[tool] = f"[Agent error: Tool '{tool}' not supported.]"
 
         aggregation_prompt = (
-            "Using the following tool results, synthesize a clear and concise response to the user's question. "
-            "You may quote or paraphrase results. List sources if relevant.\n\n"
-            "Tool results:\n" + "\n\n".join(f"{k}: {v}" for k, v in tool_results.items())
+               "You are given results from multiple tools. Your task is to **combine these results** into a detailed, cohesive answer. "
+               "Do **not summarize**; instead, **synthesize** the information into a clear recommendation that combines the best insights "
+               "from each source. For each tool, you should include specific recommendations, comparisons, and product details where applicable.\n\n"
+                "Tool results:\n" + "\n\n".join(f"{k}: {v}" for k, v in tool_results.items())
+        
         )
         agg_input = messages + [{"role": "user", "content": aggregation_prompt}]
         agg_response = await call_openrouter_llm(agg_input, self.llm_api_key, self.llm_model)
